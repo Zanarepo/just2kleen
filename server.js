@@ -1,7 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
 const nodemailer = require('nodemailer');
-const crypto = require('crypto');
+const CryptoJS = require('crypto-js'); // Import crypto-js
 const express = require('express');
+const cors = require('cors');
 require('dotenv').config();
 
 // Create Express server
@@ -95,7 +96,7 @@ async function processEmailQueue() {
 }
 
 // Periodically check and process the queue
-setInterval(processEmailQueue,  60000 );  // Check every 10 seconds
+setInterval(processEmailQueue,  1200000 );  // Check every 10 seconds
 
 // Route to handle email verification with the token
 app.get('/verify-email', async (req, res) => {
@@ -133,6 +134,155 @@ app.get('/verify-email', async (req, res) => {
 
   res.send('Email successfully verified');
 });
+
+
+
+
+
+
+
+
+
+
+// Function to send a reset password email
+app.use(express.json());
+app.use(cors());
+
+async function sendResetPasswordEmail(userEmail, role, resetToken) {
+  const resetLink = `${process.env.BASE_URL}/reset-password?token=${resetToken}&role=${role}`;
+
+  const mailOptions = {
+    from: `"Just2Kleen" <${process.env.EMAIL_USER}>`,
+    to: userEmail,
+    subject: 'Reset Your Just2Kleen Password',
+    text: `You requested a password reset. Please click the link below to reset your password:\n\n${resetLink}\n\nIf you did not request this, please ignore this email.`,
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Password reset email sent:', info.response);
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+  }
+}
+
+
+
+
+
+const crypto = require('crypto'); // Built-in crypto for random token generation
+ // crypto-js for password hashing
+
+// Endpoint to handle password reset
+app.post('/reset-password', async (req, res) => {
+  const { token, role, newPassword } = req.body;
+  const tableName = role === 'cleaner' ? 'cleaners_main_profiles' : 'clients_main_profiles';
+
+  try {
+    // Verify the token and check expiry
+    const { data: user, error } = await supabase
+      .from(tableName)
+      .select('id, token_expiry')
+      .eq('reset_token', token)
+      .single();
+
+    if (error || !user) {
+      return res.status(400).json({ message: 'Invalid or expired token' });
+    }
+
+    // Check if the token has expired
+    if (new Date(user.token_expiry) < new Date()) {
+      return res.status(400).json({ message: 'Token has expired' });
+    }
+
+    // Hash the new password using crypto-js
+    const hashedPassword = CryptoJS.SHA256(newPassword).toString();
+    console.log('Hashed Password:', hashedPassword);
+
+    // Update the user's password and clear the reset token and expiry
+    const { error: updateError } = await supabase
+      .from(tableName)
+      .update({ password: hashedPassword, reset_token: null, token_expiry: null })
+      .eq('id', user.id);
+
+    if (updateError) {
+      return res.status(500).json({ message: 'Failed to reset password' });
+    }
+
+    res.status(200).json({ message: 'Password reset successful' });
+  } catch (err) {
+    console.error('Internal server error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+
+// Endpoint to handle forgot password requests
+app.post('/forgot-password', async (req, res) => {
+  const { email, role } = req.body;
+  const tableName = role === 'cleaner' ? 'cleaners_main_profiles' : 'clients_main_profiles';
+
+  try {
+    // Check if user exists
+    const { data: user, error } = await supabase
+      .from(tableName)
+      .select('id, email')
+      .eq('email', email)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Generate a reset token and expiry time (now + 2 hours)
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpiry = new Date(Date.now() + 2 * 3600000); // Token valid for 2 hours (2 hours * 60 minutes * 60 seconds * 1000 milliseconds)
+    console.log('Token Generated At:', new Date(Date.now())); // Log the generation time
+    console.log('Token Expiry:', tokenExpiry); // Log to verify expiry time
+
+    // Update user's record with reset token and expiry
+    const { data: updatedUser, error: updateError } = await supabase
+      .from(tableName)
+      .update({ 
+        reset_token: resetToken, 
+        token_expiry: tokenExpiry.toISOString() // Ensure it's stored in ISO string format
+      })
+      .eq('email', email);
+
+    if (updateError) {
+      console.error('Error updating reset token:', updateError);
+      return res.status(500).json({ message: 'Error updating reset token' });
+    }
+
+    console.log('Updated User with Expiry:', updatedUser); // Log updated user for debugging
+    console.log('Update successful'); // Confirmation that update is completed
+
+    // Send reset email
+    await sendResetPasswordEmail(email, role, resetToken);
+    res.status(200).json({ message: 'Password reset email sent' });
+  } catch (err) {
+    console.error('Internal server error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Start the server
 app.listen(port, () => {
