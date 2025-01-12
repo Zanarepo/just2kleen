@@ -144,7 +144,8 @@ app.get('/verify-email', async (req, res) => {
 
 
 
-// Function to send a reset password email
+// ..............................................Function to send a reset password email...............................................................................................
+
 app.use(express.json());
 app.use(cors());
 
@@ -165,8 +166,6 @@ async function sendResetPasswordEmail(userEmail, role, resetToken) {
     console.error('Error sending password reset email:', error);
   }
 }
-
-
 
 
 
@@ -265,23 +264,6 @@ app.post('/forgot-password', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // Start the server
